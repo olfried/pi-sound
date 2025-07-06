@@ -15,7 +15,7 @@ jobs:
       - name: Set up build environment
         run: |
           sudo apt update
-          sudo apt install -y coreutils quilt parted qemu-user-static debootstrap zerofree zip dosfstools bsdtar libcap2-bin grep rsync xz-utils file git curl bc python3
+          sudo apt install -y coreutils quilt parted qemu-user-static debootstrap zerofree zip dosfstools libarchive-tools libcap2-bin grep rsync xz-utils file git curl bc python3
 
       - name: Add custom build stage
         run: |
