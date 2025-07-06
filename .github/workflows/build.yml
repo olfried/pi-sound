@@ -1,0 +1,64 @@
+name: Build Raspberry Pi OS MIDI Image
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build-image:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Pi-Gen
+        uses: actions/checkout@v3
+        with:
+          repository: RaspberryPiFoundation/pi-gen
+          path: pi-gen
+
+      - name: Set up build environment
+        run: |
+          sudo apt update
+          sudo apt install -y coreutils quilt parted qemu-user-static debootstrap zerofree zip dosfstools bsdtar libcap2-bin grep rsync xz-utils file git curl bc python3
+
+      - name: Copy custom stage
+        run: |
+          mkdir -p pi-gen/stage4/01-midi-setup
+          cat << 'EOF' > pi-gen/stage4/01-midi-setup/00-install.sh
+          #!/bin/bash
+          on_chroot << EOF2
+            apt-get update
+            apt-get install -y fluidsynth fluid-soundfont-gm qsynth alsa-utils chromium-browser
+
+            # Auto-start FluidSynth as a systemd service
+            cat <<EOT > /etc/systemd/system/fluidsynth.service
+            [Unit]
+            Description=FluidSynth MIDI Synthesizer
+            After=sound.target
+
+            [Service]
+            ExecStart=/usr/bin/fluidsynth -i -a alsa -m alsa_seq /usr/share/sounds/sf2/FluidR3_GM.sf2
+            Restart=always
+            User=pi
+
+            [Install]
+            WantedBy=multi-user.target
+            EOT
+
+            systemctl enable fluidsynth
+
+            # Enable SSH and VNC
+            raspi-config nonint do_ssh 0
+            raspi-config nonint do_vnc 0
+          EOF2
+          EOF
+          chmod +x pi-gen/stage4/01-midi-setup/00-install.sh
+
+      - name: Build image
+        run: |
+          cd pi-gen
+          sudo ./build.sh
+
+      - name: Upload image artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: raspberry-pi-midi-image
+          path: pi-gen/deploy/*.img
