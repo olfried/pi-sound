@@ -8,21 +8,19 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout Pi-Gen
-        uses: actions/checkout@v3
-        with:
-          repository: RaspberryPiFoundation/pi-gen
-          path: pi-gen
+      - name: Clone pi-gen
+        run: |
+          git clone --depth=1 https://github.com/RPi-Distro/pi-gen.git
 
       - name: Set up build environment
         run: |
           sudo apt update
           sudo apt install -y coreutils quilt parted qemu-user-static debootstrap zerofree zip dosfstools bsdtar libcap2-bin grep rsync xz-utils file git curl bc python3
 
-      - name: Copy custom stage
+      - name: Add custom build stage
         run: |
           mkdir -p pi-gen/stage4/01-midi-setup
-          cat << 'EOF' > pi-gen/stage4/01-midi-setup/00-install.sh
+          cat << 'EOF' > pi-gen/stage4/01-midi-setup/00-run.sh
           #!/bin/bash
           on_chroot << EOF2
             apt-get update
@@ -48,9 +46,30 @@ jobs:
             # Enable SSH and VNC
             raspi-config nonint do_ssh 0
             raspi-config nonint do_vnc 0
+
+            # Create wifi setup script
+            cat <<EOW > /usr/local/bin/wifi-setup.sh
+            #!/bin/bash
+            echo "WLAN SSID:"
+            read ssid
+            echo "WLAN Passwort:"
+            read -s psk
+            cat <<EOT2 > /etc/wpa_supplicant/wpa_supplicant.conf
+            country=DE
+            ctrl_interface=DIR=/var/run/wpa_supplicant GROUP=netdev
+            update_config=1
+            network={
+                ssid=\"\$ssid\"
+                psk=\"\$psk\"
+            }
+            EOT2
+            wpa_cli -i wlan0 reconfigure
+            EOW
+
+            chmod +x /usr/local/bin/wifi-setup.sh
           EOF2
           EOF
-          chmod +x pi-gen/stage4/01-midi-setup/00-install.sh
+          chmod +x pi-gen/stage4/01-midi-setup/00-run.sh
 
       - name: Build image
         run: |
