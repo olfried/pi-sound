@@ -1,4 +1,4 @@
-name: Build Raspberry Pi OS MIDI Image
+name: Build Raspberry Pi OS MIDI Image (Headless)
 
 on:
   workflow_dispatch:
@@ -19,9 +19,10 @@ jobs:
 
       - name: Configure build stages
         run: |
-          echo "IMG_NAME='raspios-midi'" > pi-gen/config
+          echo "IMG_NAME='raspios-midi-headless'" > pi-gen/config
           echo "ENABLE_SSH=1" >> pi-gen/config
-          echo "STAGE_LIST='stage0 stage1 stage2 stage3 stage4'" >> pi-gen/config
+          echo "DEPLOY_COMPRESSION=none" >> pi-gen/config
+          echo "STAGE_LIST='stage0 stage1 stage2 stage4'" >> pi-gen/config
 
       - name: Add custom build stage
         run: |
@@ -30,16 +31,16 @@ jobs:
           #!/bin/bash
           on_chroot << EOF2
             apt-get update
-            apt-get install -y fluidsynth fluid-soundfont-gm qsynth alsa-utils chromium-browser
+            apt-get install -y fluidsynth fluid-soundfont-gm alsa-utils
 
-            # Auto-start FluidSynth as a systemd service
+            # Auto-start FluidSynth with optimized latency
             cat <<EOT > /etc/systemd/system/fluidsynth.service
             [Unit]
             Description=FluidSynth MIDI Synthesizer
             After=sound.target
 
             [Service]
-            ExecStart=/usr/bin/fluidsynth -i -a alsa -m alsa_seq /usr/share/sounds/sf2/FluidR3_GM.sf2
+            ExecStart=/usr/bin/fluidsynth -a alsa -o audio.period-size=64 -o audio.periods=2 -o synth.sample-rate=44100 /usr/share/sounds/sf2/FluidR3_GM.sf2
             Restart=always
             User=pi
 
@@ -49,9 +50,8 @@ jobs:
 
             systemctl enable fluidsynth
 
-            # Enable SSH and VNC
+            # Enable SSH
             raspi-config nonint do_ssh 0
-            raspi-config nonint do_vnc 0
 
             # Create wifi setup script
             cat <<EOW > /usr/local/bin/wifi-setup.sh
@@ -73,6 +73,41 @@ jobs:
             EOW
 
             chmod +x /usr/local/bin/wifi-setup.sh
+
+            # Create performance mode service
+            cat <<EOT3 > /etc/systemd/system/performance-mode.service
+            [Unit]
+            Description=Set CPU governor to performance
+
+            [Service]
+            Type=oneshot
+            ExecStart=/bin/bash -c 'for cpu in /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor; do echo performance > \$cpu; done'
+
+            [Install]
+            WantedBy=multi-user.target
+            EOT3
+
+            systemctl enable performance-mode
+
+            # Disable Bluetooth and HDMI
+            echo 'dtoverlay=disable-bt' >> /boot/config.txt
+            echo 'disable_splash=1' >> /boot/config.txt
+            echo 'hdmi_blanking=2' >> /boot/config.txt
+
+            systemctl disable hciuart || true
+
+            # Disable unnecessary services
+            systemctl disable triggerhappy || true
+            systemctl disable avahi-daemon || true
+            systemctl disable cups || true
+            systemctl disable cron || true
+            systemctl disable plymouth || true
+            systemctl disable rsyslog || true
+            systemctl disable logrotate || true
+
+            # Add kernel boot parameters for low latency
+            sed -i 's/$/ quiet loglevel=3 mitigations=off nohz=on nohz_full=1-3 isolcpus=1-3/' /boot/cmdline.txt || true
+
           EOF2
           EOF
           chmod +x pi-gen/stage4/01-midi-setup/00-run.sh
@@ -85,5 +120,5 @@ jobs:
       - name: Upload image artifact
         uses: actions/upload-artifact@v4
         with:
-          name: raspberry-pi-midi-image
+          name: raspberry-pi-midi-image-headless
           path: pi-gen/deploy/*.img
